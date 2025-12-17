@@ -37,9 +37,6 @@ from urllib.request import urlopen, Request
 MULTIDOC2DIAL_ZIP_URL = "https://doc2dial.github.io/multidoc2dial/file/multidoc2dial.zip"
 
 
-# -------------------------
-# Utilities
-# -------------------------
 def hr(msg: str = "", width: int = 88) -> None:
     if msg:
         pad = max(0, width - len(msg) - 2)
@@ -61,13 +58,10 @@ def sizeof_fmt(num_bytes: float) -> str:
 
 
 def download_with_progress(url: str, dst: Path, chunk_size: int = 1024 * 1024) -> None:
-    """
-    Download `url` to `dst` with a simple progress indicator.
-    Uses urllib only (no requests dependency).
-    """
+  
     safe_mkdir(dst.parent)
     if dst.exists() and dst.stat().st_size > 0:
-        print(f"[download] Found existing file: {dst} ({sizeof_fmt(dst.stat().st_size)}). Skipping.")
+        print(f"[download] File already exists: {dst} ({sizeof_fmt(dst.stat().st_size)}). Skipping this file.")
         return
 
     print(f"[download] Downloading: {url}")
@@ -101,7 +95,7 @@ def download_with_progress(url: str, dst: Path, chunk_size: int = 1024 * 1024) -
                     speed = bytes_done / elapsed
                     print(f"\r  {sizeof_fmt(bytes_done)}  ({sizeof_fmt(speed)}/s)", end="")
 
-        print()  # newline
+        print()
         tmp.rename(dst)
         print(f"[download] Done: {dst} ({sizeof_fmt(dst.stat().st_size)})")
 
@@ -121,10 +115,7 @@ def extract_zip(zip_path: Path, extract_dir: Path) -> None:
 
 
 def find_first_file(root: Path, patterns: List[str]) -> Optional[Path]:
-    """
-    Search `root` recursively for the first file matching any of the given regex patterns.
-    Patterns are applied to the filename (not the full path).
-    """
+  
     compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
     for p in root.rglob("*.json"):
         name = p.name
@@ -145,9 +136,7 @@ def summarize_text(s: str, max_len: int = 220) -> str:
     return s[: max_len - 3] + "..."
 
 
-# -------------------------
-# Environment checks
-# -------------------------
+# check environments
 def check_environment() -> None:
     hr("Environment Check")
 
@@ -155,7 +144,7 @@ def check_environment() -> None:
     print(f"Platform: {platform.platform()}")
 
     missing = []
-    # Core libs we will rely on later
+    # lib/pkgs we need for later
     for pkg in ["torch", "transformers", "datasets", "evaluate", "sacrebleu", "spacy", "rank_bm25"]:
         try:
             __import__(pkg)
@@ -173,9 +162,9 @@ def check_environment() -> None:
     else:
         print("[OK] Core imports look good.")
 
-    # Torch + GPU
+    # try torch/gpu
     try:
-        import torch  # type: ignore
+        import torch  
 
         print(f"\nTorch: {torch.__version__}")
         print(f"CUDA available: {torch.cuda.is_available()}")
@@ -184,7 +173,7 @@ def check_environment() -> None:
             props = torch.cuda.get_device_properties(idx)
             total_gb = props.total_memory / (1024 ** 3)
             print(f"GPU[{idx}]: {props.name} | VRAM: {total_gb:.2f} GB")
-            # small GPU op sanity check
+            
             x = torch.randn(1024, 1024, device="cuda", dtype=torch.float16)
             y = (x @ x.T).mean()
             _ = y.item()
@@ -194,9 +183,9 @@ def check_environment() -> None:
     except Exception as e:
         print(f"[WARN] Torch/CUDA check failed: {e}")
 
-    # spaCy model check (rule rewriter uses this)
+    
     try:
-        import spacy  # type: ignore
+        import spacy 
 
         try:
             _ = spacy.load("en_core_web_sm")
@@ -208,9 +197,7 @@ def check_environment() -> None:
         pass
 
 
-# -------------------------
-# MultiDoc2Dial bootstrap
-# -------------------------
+# multidoc2dial setup
 @dataclass
 class MultiDoc2DialPaths:
     root: Path
@@ -233,7 +220,7 @@ def bootstrap_multidoc2dial(data_dir: Path) -> MultiDoc2DialPaths:
     download_with_progress(MULTIDOC2DIAL_ZIP_URL, zip_path)
     extract_zip(zip_path, extracted_dir)
 
-    # Robust file finding: handle possible naming typos (mutldoc2dial vs multidoc2dial)
+    
     docs_json = find_first_file(
         extracted_dir,
         patterns=[
@@ -287,7 +274,7 @@ def inspect_multidoc2dial(paths: MultiDoc2DialPaths, max_dialogues_print: int = 
     dial_train = load_json(paths.dial_train_json)
     dial_val = load_json(paths.dial_val_json)
 
-    # docs structure: typically docs[domain][doc_id] = doc_obj
+    
     if isinstance(docs, dict):
         domains = list(docs.keys())
         n_docs = 0
@@ -337,17 +324,18 @@ def inspect_multidoc2dial(paths: MultiDoc2DialPaths, max_dialogues_print: int = 
     print(f"Dialogues train: {n_train_d} | turns: {n_train_t}")
     print(f"Dialogues  val:  {n_val_d} | turns: {n_val_t}")
 
-    # Print one sample dialogue
+    # get one sample dialogue for check
     def get_first_dialogue(dials_obj: Any) -> Optional[Dict[str, Any]]:
         if isinstance(dials_obj, dict):
             for _, dom_val in dials_obj.items():
                 if isinstance(dom_val, list) and dom_val:
                     first = dom_val[0]
-                    # If first is a dict, return it; if it's a list, skip
+                    # return if first is a dict
+                    # skip if its a list
                     if isinstance(first, dict):
                         return first
                 if isinstance(dom_val, dict) and dom_val:
-                    # first value
+                    # 1st value
                     first = next(iter(dom_val.values()))
                     if isinstance(first, dict):
                         return first
@@ -380,26 +368,23 @@ def inspect_multidoc2dial(paths: MultiDoc2DialPaths, max_dialogues_print: int = 
         refs = t.get("references", [])
         print(f"  - {role:5s} | {summarize_text(utt)}")
         if refs and isinstance(refs, list):
-            # print first reference only (to avoid walls of text)
+            # print first ref
             r0 = refs[0]
             if isinstance(r0, dict):
                 print(f"      refs[0]: doc_id={r0.get('doc_id')} id_sp={r0.get('id_sp')} label={r0.get('label')}")
 
 
-# -------------------------
-# CANARD bootstrap (neural rewriter training)
-# -------------------------
+
 def inspect_canard(data_dir: Path) -> None:
     hr("CANARD (Wiki-augmented) Inspect")
 
     try:
-        from datasets import load_dataset  # type: ignore
+        from datasets import load_dataset  
     except Exception as e:
         print(f"[WARN] datasets not available: {e}")
         return
 
-    # This dataset provides fields: History (list[str]), Question, Rewrite
-    # It's derived from CANARD and includes train/test splits.
+    
     name = "gaussalgo/Canard_Wiki-augmented"
     print(f"Loading HF dataset: {name}")
 
@@ -423,9 +408,7 @@ def inspect_canard(data_dir: Path) -> None:
     print("Rewrite: ", summarize_text(rw, 200))
 
 
-# -------------------------
-# Main
-# -------------------------
+# main
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=str, default="data", help="Where to store downloaded/unzipped data.")
