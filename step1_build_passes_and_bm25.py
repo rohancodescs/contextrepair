@@ -29,12 +29,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from rank_bm25 import BM25Okapi  # type: ignore
+from rank_bm25 import BM25Okapi  
 
 
-# -------------------------
-# Utilities
-# -------------------------
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 
@@ -61,7 +58,6 @@ def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
 
 
 def tokenize(text: str) -> List[str]:
-    # BM25 tokenization: stable, simple, fast
     return TOKEN_RE.findall(text.lower())
 
 
@@ -75,9 +71,7 @@ def find_first_file(root: Path, patterns: List[str]) -> Optional[Path]:
 
 
 def locate_multidoc2dial_files(data_dir: Path) -> Tuple[Path, Path, Path]:
-    """
-    Locate docs/train/val JSON files under data_dir/raw/**.
-    """
+    # find docs/train/val json files in ~/raw/
     raw_dir = data_dir / "raw"
     if not raw_dir.exists():
         raise FileNotFoundError(f"Expected {raw_dir} to exist. Did you run step0_bootstrap.py?")
@@ -103,9 +97,7 @@ def locate_multidoc2dial_files(data_dir: Path) -> Tuple[Path, Path, Path]:
     return docs_json, dial_train_json, dial_val_json
 
 
-# -------------------------
-# MultiDoc2Dial parsing
-# -------------------------
+# parsing using multidoc2dial
 def unwrap_if_key(obj: Any, key: str) -> Any:
     if isinstance(obj, dict) and key in obj:
         return obj[key]
@@ -113,20 +105,15 @@ def unwrap_if_key(obj: Any, key: str) -> Any:
 
 
 def load_docs(docs_json: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
-    """
-    Returns: docs_by_domain[domain][doc_id] = doc_obj
-    Handles possible wrappers like {"doc_data": {...}}.
-    """
     raw = load_json(docs_json)
     raw = unwrap_if_key(raw, "doc_data")
     if not isinstance(raw, dict):
         raise ValueError(f"docs_json root must be dict after unwrap; got {type(raw)}")
-
-    # Expect: domain -> (doc_id -> doc_obj)
+      
+    # expected outcome: domain -> doc_id -> doc_obj
     docs_by_domain: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for domain, v in raw.items():
         if not isinstance(v, dict):
-            # Some formats could be list of docs; handle minimally
             if isinstance(v, list):
                 tmp: Dict[str, Dict[str, Any]] = {}
                 for doc in v:
@@ -138,7 +125,7 @@ def load_docs(docs_json: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
         else:
             docs_by_domain[str(domain)] = {str(doc_id): doc for doc_id, doc in v.items() if isinstance(doc, dict)}
 
-    # sanity: must have docs
+    # need docs here
     total_docs = sum(len(x) for x in docs_by_domain.values())
     if total_docs == 0:
         raise ValueError("Parsed 0 documents. Check docs_json format.")
@@ -146,10 +133,7 @@ def load_docs(docs_json: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
 
 
 def load_dialogues(dial_json: Path) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Returns: dialogues_by_domain[domain] = [dialogue_obj, ...]
-    Handles possible wrappers like {"dial_data": {...}}.
-    """
+
     raw = load_json(dial_json)
     raw = unwrap_if_key(raw, "dial_data")
     if not isinstance(raw, dict):
@@ -160,7 +144,6 @@ def load_dialogues(dial_json: Path) -> Dict[str, List[Dict[str, Any]]]:
         if isinstance(v, list):
             out[str(domain)] = [d for d in v if isinstance(d, dict)]
         elif isinstance(v, dict):
-            # Could be dict of dial_id -> dial_obj
             out[str(domain)] = [d for d in v.values() if isinstance(d, dict)]
         else:
             out[str(domain)] = []
@@ -171,14 +154,7 @@ def iter_agent_examples(
     dialogues_by_domain: Dict[str, List[Dict[str, Any]]],
     history_turns: int = 6,
 ) -> Iterable[Tuple[str, List[Dict[str, Any]], str, str, Set[str], Set[str]]]:
-    """
-    Yield examples aligned to agent turns with references.
 
-    Returns tuples:
-      (example_id, history_list, user_turn_text, agent_turn_text, gold_doc_ids, gold_span_ids)
-
-    We align each agent turn to the most recent preceding user turn.
-    """
     for domain, dials in dialogues_by_domain.items():
         for dial in dials:
             dial_id = str(dial.get("dial_id", ""))
@@ -210,7 +186,8 @@ def iter_agent_examples(
                 if not user_turn or not agent_turn:
                     continue
 
-                # history excludes current user turn, include up to history_turns previous turns
+                # history excludes current user turn
+                # include up to history_turns previous turns
                 hist_start = max(0, j - history_turns)
                 hist = [x for x in turns[hist_start:j] if isinstance(x, dict)]
 
@@ -230,10 +207,6 @@ def iter_agent_examples(
                 ex_id = f"{domain}::{dial_id}::turn{i}"
                 yield ex_id, hist, user_turn, agent_turn, gold_doc_ids, gold_span_ids
 
-
-# -------------------------
-# Passage building (structure-aware by section)
-# -------------------------
 @dataclass
 class Passage:
     passage_id: str
@@ -249,9 +222,7 @@ def build_section_passages(
     docs_by_domain: Dict[str, Dict[str, Dict[str, Any]]],
     min_chars: int = 60,
 ) -> List[Passage]:
-    """
-    Group spans by section (id_sec) and use text_sec for passage text.
-    """
+
     passages: List[Passage] = []
     pid = 0
 
@@ -260,8 +231,7 @@ def build_section_passages(
             spans = doc.get("spans", {})
             if not isinstance(spans, dict):
                 continue
-
-            # key: id_sec -> aggregated section data
+              
             sec_map: Dict[str, Dict[str, Any]] = {}
 
             for id_sp, sp in spans.items():
@@ -302,8 +272,8 @@ def build_section_passages(
                 if entry.get("title"):
                     title_path.append(str(entry["title"]))
 
-                # Optional: prefix with doc title and section titles to help lexical retrieval
-                # This is constant across experiments, so it's safe.
+              
+                # this constant is needed across experiments
                 prefix_parts = []
                 if doc_title:
                     prefix_parts.append(doc_title)
@@ -330,9 +300,7 @@ def build_section_passages(
     return passages
 
 
-# -------------------------
 # BM25 indexing + retrieval
-# -------------------------
 @dataclass
 class BM25Index:
     passages: List[Passage]
@@ -347,12 +315,11 @@ def build_bm25_index(passages: List[Passage]) -> BM25Index:
 
 
 def retrieve(index: BM25Index, query: str, k: int) -> List[int]:
-    """
-    Returns indices into index.passages for top-k.
-    """
+
     qtok = tokenize(query)
     scores = index.bm25.get_scores(qtok)
-    # scores is a numpy array-like; handle without numpy dependency assumptions
+    # scores is a numpy array
+    # handle without numpy dependency assumptions
     ranked = sorted(range(len(scores)), key=lambda i: float(scores[i]), reverse=True)
     return ranked[:k]
 
@@ -362,7 +329,6 @@ def build_query_q1(user_turn: str) -> str:
 
 
 def build_query_q2_concat(history: List[Dict[str, Any]], user_turn: str, max_turns: int = 6) -> str:
-    # last `max_turns` history turns, include role labels to reduce ambiguity
     parts: List[str] = []
     hist_tail = history[-max_turns:] if max_turns > 0 else history
     for t in hist_tail:
@@ -374,9 +340,6 @@ def build_query_q2_concat(history: List[Dict[str, Any]], user_turn: str, max_tur
     return " ".join(parts)
 
 
-# -------------------------
-# Sanity eval: recall@k
-# -------------------------
 @dataclass
 class RecallStats:
     n: int = 0
@@ -415,9 +378,9 @@ def eval_recall(
         for i in top_idx:
             retrieved_spans |= passage_span_sets[i]
 
-        # doc-level hit if any gold doc present
+        # doc-level hit if any gold DOC present
         doc_hit = bool(gold_doc_ids & retrieved_docs) if gold_doc_ids else False
-        # span-level hit if any gold span id present
+        # span-level hit if any gold SPAN ID present
         span_hit = bool(gold_span_ids & retrieved_spans) if gold_span_ids else False
 
         stats.n += 1
@@ -427,9 +390,7 @@ def eval_recall(
     return stats
 
 
-# -------------------------
-# Main
-# -------------------------
+# main
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=str, default="data")
@@ -464,7 +425,7 @@ def main() -> None:
     for d, v in list(dials_train_by_domain.items())[:5]:
         print(f"  - train domain={d} dialogues={len(v)}")
 
-    # Print one sample dialogue (first non-empty)
+    # get one sample dialogue
     print("\n--- Sample dialogue (first 8 turns) ---")
     sample = None
     for dom, dials in dials_train_by_domain.items():
@@ -491,17 +452,17 @@ def main() -> None:
     else:
         print("[WARN] No sample dialogue found.")
 
-    # Build passages
+    # for passages
     print("\nBuilding section passages from spans...")
     passages = build_section_passages(docs_by_domain, min_chars=args.min_passage_chars)
     print(f"Built passages: {len(passages)} (min_chars={args.min_passage_chars})")
 
-    # Build BM25 index
+    # for BM25 index
     print("Building BM25 index...")
     index = build_bm25_index(passages)
     print("BM25 ready.")
 
-    # Save artifacts
+    # saving artifacts
     processed_dir = data_dir / "processed"
     indices_dir = data_dir / "indices"
     safe_mkdir(processed_dir)
@@ -548,7 +509,7 @@ def main() -> None:
 
     print(f"\nSaved:\n  {passages_path}\n  {meta_path}\n  {bm25_path}")
 
-    # Quick retrieval sanity eval on a subset of TRAIN dialogues
+    # retrieval eval on a subset of TRAIN dialogues
     all_examples = list(iter_agent_examples(dials_train_by_domain, history_turns=args.history_turns))
     print(f"\nConstructed evaluable (agent-referenced) examples from train: {len(all_examples)}")
 
