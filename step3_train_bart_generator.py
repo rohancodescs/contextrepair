@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import torch
-from rank_bm25 import BM25Okapi  # type: ignore
+from rank_bm25 import BM25Okapi 
 from transformers import (
     AutoTokenizer,
     BartForConditionalGeneration,
@@ -56,16 +56,14 @@ from transformers import (
 )
 
 try:
-    from tqdm import tqdm  # type: ignore
+    from tqdm import tqdm  
 except Exception:
     tqdm = None
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 
-# -------------------------
-# IO helpers
-# -------------------------
+# IO helper func
 def safe_mkdir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
@@ -98,7 +96,7 @@ def topk_indices_and_scores(scores: Any, k: int) -> List[Tuple[int, float]]:
     Uses numpy if available, else pure python.
     """
     try:
-        import numpy as np  # type: ignore
+        import numpy as np  
 
         if isinstance(scores, np.ndarray):
             k_eff = min(k, scores.shape[0])
@@ -116,9 +114,7 @@ def topk_indices_and_scores(scores: Any, k: int) -> List[Tuple[int, float]]:
     return [(i, float(scores[i])) for i in ranked]
 
 
-# -------------------------
-# Query building (Q2 concat baseline)
-# -------------------------
+# building queries
 def build_query_q2_concat(history: List[Dict[str, Any]], user_turn: str, max_turns_concat: int = 6) -> str:
     parts: List[str] = []
     hist_tail = history[-max_turns_concat:] if max_turns_concat > 0 else history
@@ -131,9 +127,8 @@ def build_query_q2_concat(history: List[Dict[str, Any]], user_turn: str, max_tur
     return " ".join(parts)
 
 
-# -------------------------
-# Passage loading + BM25
-# -------------------------
+# passage loading
+# bm25 loading
 @dataclass
 class PassageStore:
     passage_ids: List[str]
@@ -170,9 +165,7 @@ def bm25_retrieve_pids(
     return [store.passage_ids[i] for i, _ in top]
 
 
-# -------------------------
-# Train retrieval cache loader
-# -------------------------
+# retrieval cache loader (training)
 def load_train_retrieval_cache(cache_jsonl: Path) -> Dict[str, List[str]]:
     """
     Map example_id -> list of passage_ids (ordered).
@@ -194,9 +187,7 @@ def load_train_retrieval_cache(cache_jsonl: Path) -> Dict[str, List[str]]:
     return m
 
 
-# -------------------------
-# Input formatting
-# -------------------------
+# format for input
 def truncate_text_to_tokens(tokenizer: Any, text: str, max_tokens: int) -> str:
     """
     Truncate raw text to at most max_tokens (tokenizer tokens).
@@ -217,7 +208,7 @@ def format_model_input(
     evidence_texts: List[str],
     max_passage_tokens: int,
 ) -> str:
-    # History block
+    # blocks for history
     hist_lines: List[str] = []
     for t in history:
         role = str(t.get("role", "")).strip().lower()
@@ -225,7 +216,7 @@ def format_model_input(
         if not utt:
             continue
         role_label = "User" if role == "user" else "Agent"
-        # keep history reasonably short (avoid super long lines)
+        # keep history pretty short 
         utt = re.sub(r"\s+", " ", utt)
         if len(utt) > 240:
             utt = utt[:237] + "..."
@@ -233,7 +224,7 @@ def format_model_input(
 
     history_block = "\n".join(hist_lines) if hist_lines else "(none)"
 
-    # Evidence block (truncate each passage by token budget)
+    # evidence block
     ev_lines: List[str] = []
     for i, ptxt in enumerate(evidence_texts[:], start=1):
         ptxt = re.sub(r"\s+", " ", ptxt).strip()
@@ -255,9 +246,7 @@ def format_model_input(
     return prompt
 
 
-# -------------------------
-# Dataset
-# -------------------------
+# dataset
 class GenDataset(torch.utils.data.Dataset):
     def __init__(
         self,
@@ -286,7 +275,7 @@ class GenDataset(torch.utils.data.Dataset):
         self.require_cache = require_cache
         self.split_name = split_name
 
-        # Pre-attach evidence pids to avoid doing retrieval inside __getitem__
+        # attach evidence pids to skip over the retrieval process inside __getitem__
         self._evidence_pids: List[List[str]] = []
         self._attach_evidence()
 
@@ -295,7 +284,7 @@ class GenDataset(torch.utils.data.Dataset):
         it = tqdm(self.examples, desc=f"Attach evidence ({self.split_name})") if use_tqdm else self.examples
 
         missing = 0
-        for ex in it:  # type: ignore
+        for ex in it:  
             ex_id = str(ex["example_id"])
             history = ex["history"]
             user_turn = str(ex["user_turn"])
@@ -306,7 +295,7 @@ class GenDataset(torch.utils.data.Dataset):
                     missing += 1
                     self._evidence_pids.append([])
                     continue
-                # fallback BM25 retrieval (Q2 concat)
+                # fallback for BM25 retrieval
                 q = build_query_q2_concat(history, user_turn, max_turns_concat=self.max_turns_concat)
                 pids = bm25_retrieve_pids(self.store, q, k=self.k)
 
@@ -326,7 +315,6 @@ class GenDataset(torch.utils.data.Dataset):
 
         pids = self._evidence_pids[idx]
         evidence_texts = [self.store.passage_id_to_text.get(pid, "") for pid in pids if pid in self.store.passage_id_to_text]
-        # Format
         src_text = format_model_input(
             self.tokenizer, history, user_turn, evidence_texts, max_passage_tokens=self.max_passage_tokens
         )
@@ -350,13 +338,11 @@ class GenDataset(torch.utils.data.Dataset):
         return model_inputs
 
 
-# -------------------------
-# Seeding
-# -------------------------
+# seeding
 def set_seed(seed: int) -> None:
     random.seed(seed)
     try:
-        import numpy as np  # type: ignore
+        import numpy as np 
 
         np.random.seed(seed)
     except Exception:
@@ -366,9 +352,7 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-# -------------------------
-# Main
-# -------------------------
+# main
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=str, default="data")
@@ -424,7 +408,7 @@ def main() -> None:
     train_cache = load_train_retrieval_cache(cache_train_path)
     print(f"Train cache rows: {len(train_cache)}")
 
-    # Load examples
+    # load the examples
     limit_train = args.limit_train if args.limit_train > 0 else None
     limit_val = args.limit_val if args.limit_val > 0 else None
 
@@ -434,7 +418,8 @@ def main() -> None:
     val_examples = load_jsonl(examples_val_path, limit=limit_val)
     print(f"Examples loaded: train={len(train_examples)} val={len(val_examples)}")
 
-    # Tokenizer + model
+    # tokenizer
+    # model
     print("Loading tokenizer/model:", args.model_name)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
     model = BartForConditionalGeneration.from_pretrained(args.model_name)
@@ -443,7 +428,7 @@ def main() -> None:
         print("Enabling gradient checkpointing...")
         model.gradient_checkpointing_enable()
 
-    # Datasets
+    # datasets
     train_ds = GenDataset(
         examples=train_examples,
         store=store,
@@ -460,7 +445,7 @@ def main() -> None:
     val_ds = GenDataset(
         examples=val_examples,
         store=store,
-        train_cache={},  # don't use train cache for val
+        train_cache={},  
         tokenizer=tokenizer,
         k=args.k,
         max_turns_concat=args.max_turns_concat,
@@ -471,10 +456,10 @@ def main() -> None:
         split_name="val",
     )
 
-    # Collator
+    # collator
     collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, label_pad_token_id=-100)
 
-    # Training args
+    # train the args
     safe_mkdir(Path(args.output_dir))
     training_args = Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
@@ -493,14 +478,14 @@ def main() -> None:
         fp16=(not args.no_fp16),
         report_to="none",
         dataloader_num_workers=0,
-        predict_with_generate=False,  # eval loss only for now
+        predict_with_generate=False,  
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
         save_total_limit=2,
     )
 
-    # Trainer
+    # trainer
     trainer = Seq2SeqTrainer(
         model=model,
         args=training_args,
@@ -510,16 +495,16 @@ def main() -> None:
         data_collator=collator,
     )
 
-    # Train
+    # training using ^^^
     print("\nStarting training...")
     trainer.train()
 
-    # Save final
+    # save final model
     print("\nSaving final model + tokenizer...")
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
 
-    # Save config snapshot
+    # save path for config snapshot
     cfg_path = Path(args.output_dir) / "run_config.json"
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(vars(args), f, indent=2)
