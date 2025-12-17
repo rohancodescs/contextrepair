@@ -2,8 +2,7 @@
 """
 step5c_slice_analysis.py
 
-Slice evaluation for generation + retrieval metrics.
-Slices are based on the same heuristic triggers used by the rewriter:
+This file is for evaluating hthe slices for generation + retrieval metrics, they're based on the same heuristic triggers used by the rewriter:
 - short turns
 - ellipsis prefixes ("what about", "besides that", etc.)
 - pronouns/demonstratives ("it", "that", "they", ...)
@@ -20,7 +19,6 @@ Run:
 """
 
 from __future__ import annotations
-
 import argparse
 import json
 import pickle
@@ -35,10 +33,8 @@ try:
 except Exception:
     sacrebleu = None
 
-
-# -------------------------
 # IO
-# -------------------------
+
 def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -58,9 +54,9 @@ def load_examples_map(examples_path: Path) -> Dict[str, Dict[str, Any]]:
     return m
 
 
-# -------------------------
+
 # Tokenization + triggers (match your step4 logic)
-# -------------------------
+
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 PRONOUN_TRIGGERS = {
@@ -103,9 +99,9 @@ def needs_rewrite(user_turn: str) -> Tuple[bool, List[str]]:
     return (len(reasons) > 0), reasons
 
 
-# -------------------------
+
 # EM/F1 normalization (same as step5_eval_predictions)
-# -------------------------
+
 _ARTICLES = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
 _PUNCT_TABLE = str.maketrans("", "", string.punctuation)
 _WS = re.compile(r"\s+")
@@ -143,9 +139,9 @@ def f1_score(pred: str, ref: str) -> float:
     return (2 * precision * recall) / (precision + recall)
 
 
-# -------------------------
+
 # Slice accumulator
-# -------------------------
+
 class SliceAgg:
     def __init__(self) -> None:
         self.n = 0
@@ -240,7 +236,7 @@ def main() -> None:
         raise FileNotFoundError(f"Missing {lookup_path}")
 
     if sacrebleu is None:
-        print("[WARN] sacrebleu not installed, BLEU will be N/A (pip install sacrebleu).")
+        print("sacrebleu not installed, BLEU will be N/A (pip install sacrebleu).")
 
     examples_map = load_examples_map(examples_path)
 

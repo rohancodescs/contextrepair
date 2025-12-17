@@ -2,24 +2,14 @@
 """
 step6_train_t5_rewriter_canard.py
 
-Train a neural conversational query rewriter (T5-small) on CANARD (Wiki-augmented).
-Input: History + Question
-Output: Rewrite
+Train a neural conversational query rewriter (T5-small) on CANARD (Wiki-augmented). Takes in history + question, outputs rewrite.
 
-After training, you will use it in NEWstep4_generate_predictions.py via:
+After re-training, given the time I would;ve used it in my refined predction generator (NEWstep4_generate_predictions.py) via these CLI args:
   --mode q4_t5 --t5_rewriter_dir <output_dir> --rewriter_device cpu
 
-Debug run:
+test run:
   python step6_train_t5_rewriter_canard.py --output_dir ./outputs/t5_rewriter_debug ^
     --max_train_samples 5000 --max_eval_samples 500 --epochs 1
-
-Full run:
-  python step6_train_t5_rewriter_canard.py --output_dir ./outputs/t5_rewriter_canard ^
-    --epochs 3
-
-Notes:
-- On an 8GB GPU, T5-small fine-tunes comfortably with fp16.
-- During generation with BART, keep the rewriter on CPU to avoid VRAM contention.
 """
 
 from __future__ import annotations
@@ -40,13 +30,13 @@ from transformers import (
     Seq2SeqTrainingArguments,
 )
 
-# metrics (optional but useful for intrinsic reporting)
 try:
     import evaluate  # type: ignore
 except Exception:
     evaluate = None
 
 
+# Sets all RNG seeds for reproducible training.
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -55,6 +45,7 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+# Formats a CANARD dialogue history + question into the rewrite prompt.
 def format_source(history: Any, question: str, max_hist: int = 6) -> str:
     """
     history is typically List[str] in this dataset.
@@ -71,6 +62,7 @@ def format_source(history: Any, question: str, max_hist: int = 6) -> str:
     return f"rewrite: {hist_str} question: {question}" if hist_str else f"rewrite: question: {question}"
 
 
+# Parses CLI args, prepares datasets, and fine-tunes the T5 rewriter.
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset_name", type=str, default="gaussalgo/Canard_Wiki-augmented")
@@ -123,6 +115,7 @@ def main() -> None:
         print("Enabling gradient checkpointing...")
         model.gradient_checkpointing_enable()
 
+    # Tokenizes batches by building rewrite prompts and targets.
     def preprocess(batch: Dict[str, List[Any]]) -> Dict[str, Any]:
         histories = batch["History"]
         questions = batch["Question"]
@@ -160,6 +153,7 @@ def main() -> None:
         except Exception:
             bleu = None
 
+    # Computes BLEU/ROUGE metrics for generated rewrites.
     def compute_metrics(eval_pred):
         # Only used if predict_with_generate=True
         preds, labels = eval_pred
@@ -237,8 +231,6 @@ def main() -> None:
     tok.save_pretrained(args.output_dir)
 
     print("\nDone. Rewriter saved to:", args.output_dir)
-    print("Next: run NEWstep4_generate_predictions.py with --mode q4_t5 and --t5_rewriter_dir", args.output_dir)
-    print("Recommendation: use --rewriter_device cpu during BART generation to avoid GPU memory contention.")
 
 
 if __name__ == "__main__":

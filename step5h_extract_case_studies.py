@@ -2,8 +2,7 @@
 """
 step5h_extract_case_studies.py
 
-Extract top-N win/loss examples between two prediction files (baseline vs improved).
-Outputs a readable text report you can paste into your paper/slides.
+Extract top-N win/loss examples between two prediction files (baseline vs improved), returns a readable text report
 
 Run:
   python step5h_extract_case_studies.py --pred_a outputs/predictions/bart_debug/val_q2_lim1000_k5.jsonl ^
@@ -18,7 +17,7 @@ from pathlib import Path
 from collections import Counter
 from typing import Any, Dict, Iterable, List, Tuple
 
-# -------- IO --------
+# IO 
 def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -34,7 +33,7 @@ def load_map(path: Path) -> Dict[str, Dict[str, Any]]:
             m[ex_id]=r
     return m
 
-# -------- F1 --------
+# F1
 _ARTICLES = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
 _PUNCT_TABLE = str.maketrans("", "", string.punctuation)
 _WS = re.compile(r"\s+")
@@ -61,7 +60,7 @@ def f1_score(pred: str, ref: str) -> float:
     recall = num_same / len(rt)
     return (2 * precision * recall) / (precision + recall)
 
-# -------- Trigger detector (matches your project) --------
+#Trigger detector
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 PRONOUN_TRIGGERS = {"it","that","this","they","them","those","these","its","their"}
 ELLIPSIS_PREFIXES = (

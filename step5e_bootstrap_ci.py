@@ -2,8 +2,7 @@
 """
 step5e_bootstrap_ci.py
 
-Bootstrap confidence intervals for delta metrics between two prediction files.
-Computes per-example EM and token-F1, then bootstraps mean deltas.
+Bootstrap confidence intervals for delta metrics between two prediction files, it calculates the per-example EM and token-F1
 
 Run:
   python step5e_bootstrap_ci.py --pred_a outputs/predictions/bart_full/test_q2_k5.jsonl ^
@@ -12,7 +11,6 @@ Run:
 """
 
 from __future__ import annotations
-
 import argparse
 import json
 import random
@@ -21,7 +19,7 @@ import string
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
-# ---------- IO ----------
+#  IO 
 def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -37,7 +35,7 @@ def load_map(path: Path) -> Dict[str, Dict[str, Any]]:
             m[ex_id] = r
     return m
 
-# ---------- EM/F1 ----------
+# EM and F1 metrics
 _ARTICLES = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
 _PUNCT_TABLE = str.maketrans("", "", string.punctuation)
 _WS = re.compile(r"\s+")
@@ -129,8 +127,8 @@ def main() -> None:
     p_f1 = 2 * min(sum(d <= 0 for d in deltas_f1)/len(deltas_f1), sum(d >= 0 for d in deltas_f1)/len(deltas_f1))
 
     print(f"n={n}")
-    print(f"ΔEM  = {delta_em:.4f}  95%CI[{ci_em[0]:.4f}, {ci_em[1]:.4f}]  approx_p={p_em:.4f}")
-    print(f"ΔF1  = {delta_f1:.4f}  95%CI[{ci_f1[0]:.4f}, {ci_f1[1]:.4f}]  approx_p={p_f1:.4f}")
+    print(f"ΔEM = {delta_em:.4f}  95%CI[{ci_em[0]:.4f}, {ci_em[1]:.4f}]  approx_p={p_em:.4f}")
+    print(f"ΔF1 = {delta_f1:.4f}  95%CI[{ci_f1[0]:.4f}, {ci_f1[1]:.4f}]  approx_p={p_f1:.4f}")
 
 if __name__ == "__main__":
     main()

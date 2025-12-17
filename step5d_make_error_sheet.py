@@ -2,16 +2,13 @@
 """
 step5d_make_error_sheet.py
 
-Export a CSV for qualitative error analysis comparing multiple prediction files.
-
-It joins:
+Export a CSV for qualitative error analysis comparing multiple prediction files. The CSV joins:
 - examples_{split}.jsonl (history + gold docs/spans)
 - passage_lookup.pkl (span ids + passage text previews)
 - prediction jsonl files (prediction, query, evidence ids, rewrite_debug)
 
-It can also *sample* and *stratify* by where improved method wins/loses on token-F1.
-
-Example:
+It can also *sample* and *stratify* by where improved method wins/loses on token-F1. See the CLI parameters in main, and example below:
+Example on how to run:
   python step5d_make_error_sheet.py --data_dir ./data --split val ^
     --pred_files outputs/predictions/bart_debug/val_q2_k5.jsonl ^
                 outputs/predictions/bart_debug/val_q4_t5_q2fb_append_k5.jsonl ^
@@ -34,7 +31,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 
-# ---------- IO ----------
+#IO
 def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -43,7 +40,7 @@ def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
                 yield json.loads(line)
 
 
-# ---------- Normalization + F1 ----------
+# Normalization + F1
 _ARTICLES = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
 _PUNCT_TABLE = str.maketrans("", "", string.punctuation)
 _WS = re.compile(r"\s+")
@@ -73,7 +70,7 @@ def f1_score(pred: str, ref: str) -> float:
     return (2 * precision * recall) / (precision + recall)
 
 
-# ---------- Trigger slices (match your rewrite triggers) ----------
+#  Trigger slices 
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 PRONOUN_TRIGGERS = {"it", "that", "this", "they", "them", "those", "these", "its", "their"}
@@ -124,7 +121,7 @@ def in_focus(user_turn: str, focus: str) -> bool:
     return focus in reasons  # pronoun / short_turn / ellipsis_prefix
 
 
-# ---------- Loaders ----------
+# Loaders
 def load_examples_map(examples_path: Path) -> Dict[str, Dict[str, Any]]:
     m: Dict[str, Dict[str, Any]] = {}
     for ex in iter_jsonl(examples_path):
@@ -334,7 +331,7 @@ def main() -> None:
             "gold_doc_ids": " | ".join(sorted(ex["gold_doc_ids"])),
             "gold_span_ids": " | ".join(sorted(ex["gold_span_ids"])),
             "label_error_type": "",
-            "label_who_failed": "",  # e.g., retrieval, rewrite, generation, reference ambiguity
+            "label_who_failed": "",  # i.e., retrieval, rewrite, generation, reference ambiguity
             "label_notes": "",
         }
 

@@ -42,15 +42,18 @@ TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 
 # IO helper func
+# Creates the directory path if missing.
 def safe_mkdir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
+# Loads JSON content from disk.
 def load_json(path: Path) -> Any:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
+# Streams dictionaries from a JSONL file.
 def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -60,6 +63,7 @@ def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
             yield json.loads(line)
 
 
+# Writes dictionaries to JSONL, one row per line.
 def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
     safe_mkdir(path.parent)
     with open(path, "w", encoding="utf-8") as f:
@@ -67,6 +71,7 @@ def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
+# Appends dictionaries to an existing JSONL file.
 def append_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
     safe_mkdir(path.parent)
     with open(path, "a", encoding="utf-8") as f:
@@ -74,6 +79,7 @@ def append_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
+# Searches recursively for the first JSON whose name matches any regex.
 def find_first_file(root: Path, patterns: List[str]) -> Optional[Path]:
     compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
     for p in root.rglob("*.json"):
@@ -82,6 +88,7 @@ def find_first_file(root: Path, patterns: List[str]) -> Optional[Path]:
     return None
 
 
+# Locates the train/val/test dialogue JSON files under data/raw.
 def locate_multidoc2dial_dialogue_files(data_dir: Path) -> Tuple[Path, Path, Optional[Path]]:
     raw_dir = data_dir / "raw"
     if not raw_dir.exists():
@@ -96,12 +103,14 @@ def locate_multidoc2dial_dialogue_files(data_dir: Path) -> Tuple[Path, Path, Opt
     return train_json, val_json, test_json
 
 
+# Returns obj[key] if that key exists on a dict, else the original object.
 def unwrap_if_key(obj: Any, key: str) -> Any:
     if isinstance(obj, dict) and key in obj:
         return obj[key]
     return obj
 
 
+# Loads a dialogue JSON and groups entries by domain.
 def load_dialogues_by_domain(dial_json: Path) -> Dict[str, List[Dict[str, Any]]]:
 
     raw = load_json(dial_json)
@@ -122,10 +131,12 @@ def load_dialogues_by_domain(dial_json: Path) -> Dict[str, List[Dict[str, Any]]]
 
 # passage helper
 # bm25 helper
+# Performs the shared regex tokenization.
 def tokenize(text: str) -> List[str]:
     return TOKEN_RE.findall(text.lower())
 
 
+# Loads passages and returns ids, doc_ids, texts, and span sets.
 def load_passages(passages_jsonl: Path) -> Tuple[List[str], List[str], List[str], List[Set[str]]]:
 
     pids: List[str] = []
@@ -150,11 +161,13 @@ def load_passages(passages_jsonl: Path) -> Tuple[List[str], List[str], List[str]
     return pids, doc_ids, texts, span_sets
 
 
+# Builds a BM25 index over the supplied texts.
 def build_bm25(texts: List[str]) -> BM25Okapi:
     tokenized_corpus = [tokenize(t) for t in texts]
     return BM25Okapi(tokenized_corpus)
 
 
+# Returns the top-k indices and scores from a BM25 score vector.
 def topk_indices_and_scores(scores: Any, k: int) -> List[Tuple[int, float]]:
 
     try:
@@ -178,6 +191,7 @@ def topk_indices_and_scores(scores: Any, k: int) -> List[Tuple[int, float]]:
 
 
 # task-II generation examples (from dialouges)
+# Builds generation training examples from dialogues with referenced agent turns.
 def build_examples_from_dialogues(
     dialogues_by_domain: Dict[str, List[Dict[str, Any]]],
     history_turns: int = 6,
@@ -252,6 +266,7 @@ def build_examples_from_dialogues(
     return examples
 
 
+# Builds the Q2 retrieval query by concatenating history and user turn text.
 def build_query_q2_concat(history: List[Dict[str, Any]], user_turn: str, max_turns_concat: int = 6) -> str:
     """
     Query baseline: concat last N history turns + current user turn.
@@ -269,6 +284,7 @@ def build_query_q2_concat(history: List[Dict[str, Any]], user_turn: str, max_tur
 
 
 # retrieval cache before compute
+# Loads the example_ids that have already been cached to skip duplicates.
 def load_done_example_ids(cache_path: Path) -> Set[str]:
     done: Set[str] = set()
     if not cache_path.exists():
@@ -280,6 +296,7 @@ def load_done_example_ids(cache_path: Path) -> Set[str]:
     return done
 
 
+# Precomputes BM25 retrieval results for each example and saves them.
 def precompute_retrieval_cache(
     *,
     examples: Sequence[Dict[str, Any]],
@@ -375,7 +392,7 @@ def precompute_retrieval_cache(
         print("[cache] Nothing new was cached (maybe everything was already done).")
 
 
-# main
+# Parses CLI arguments and coordinates example creation plus caching.
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=str, default="data")
@@ -478,9 +495,6 @@ def main() -> None:
         resume=args.resume,
         limit=limit,
     )
-
-    print("\nNext file: train a BART-base generator using examples_train + retrieved_train_q2_k5.")
-    print("Tip: start with --limit_train 2000 to validate training end-to-end, then scale up.")
 
 
 if __name__ == "__main__":

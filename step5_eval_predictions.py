@@ -4,7 +4,7 @@ step5_eval_predictions.py
 
 Evaluate prediction JSONL files produced by step4_generate_predictions.py.
 
-Metrics:
+Metrics generated include:
 - Exact Match (EM) using normalized strings (lowercase, strip punctuation/articles)
 - Token-level F1 (SQuAD-style) using normalized tokens
 - SacreBLEU (corpus_bleu) using raw strings (strip only)
@@ -15,7 +15,6 @@ Run:
 """
 
 from __future__ import annotations
-
 import argparse
 import json
 import re
@@ -24,13 +23,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
-    import sacrebleu  # type: ignore
+    import sacrebleu # type: ignore
 except Exception as e:
     sacrebleu = None
 
-# -------------------------
-# IO
-# -------------------------
+
+# IO Streams prediction rows from a JSONL file.
 def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -40,15 +38,13 @@ def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
             yield json.loads(line)
 
 
-# -------------------------
+
 # Normalization for EM/F1
-# (SQuAD-style)
-# -------------------------
 _ARTICLES = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
 _PUNCT_TABLE = str.maketrans("", "", string.punctuation)
 _WS = re.compile(r"\s+")
 
-
+# Applies lowercase/article/punctuation normalization to answers.
 def normalize_answer(s: str) -> str:
     s = s.lower()
     s = s.translate(_PUNCT_TABLE)
@@ -56,7 +52,7 @@ def normalize_answer(s: str) -> str:
     s = _WS.sub(" ", s).strip()
     return s
 
-
+# Computes SQuAD-style token F1 between prediction and reference.
 def f1_score(prediction: str, reference: str) -> float:
     pred_norm = normalize_answer(prediction)
     ref_norm = normalize_answer(reference)
@@ -81,13 +77,11 @@ def f1_score(prediction: str, reference: str) -> float:
     return (2 * precision * recall) / (precision + recall)
 
 
+# Returns 1.0 if normalized prediction matches reference exactly.
 def exact_match(prediction: str, reference: str) -> float:
     return 1.0 if normalize_answer(prediction) == normalize_answer(reference) else 0.0
 
-
-# -------------------------
-# Evaluation
-# -------------------------
+# Computes EM/F1/BLEU metrics for a prediction JSONL file.
 def evaluate_file(path: Path) -> Dict[str, Any]:
     rows = list(iter_jsonl(path))
     if not rows:
@@ -133,6 +127,7 @@ def evaluate_file(path: Path) -> Dict[str, Any]:
     }
 
 
+# Prints a simple metrics table for multiple runs.
 def print_table(results: List[Dict[str, Any]]) -> None:
     # Simple console table
     headers = ["file", "n", "EM", "F1", "SacreBLEU"]
@@ -148,6 +143,7 @@ def print_table(results: List[Dict[str, Any]]) -> None:
         ])
 
     col_widths = [max(len(h), max((len(row[i]) for row in rows), default=0)) for i, h in enumerate(headers)]
+    # Formats a table row with padded columns.
     def fmt_row(items: List[str]) -> str:
         return " | ".join(items[i].ljust(col_widths[i]) for i in range(len(items)))
 
@@ -159,6 +155,7 @@ def print_table(results: List[Dict[str, Any]]) -> None:
     print()
 
 
+# parses CLI args and evaluates each requested predictions file
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pred_files", nargs="+", required=True, help="One or more prediction JSONL files.")
@@ -171,8 +168,8 @@ def main() -> None:
             raise FileNotFoundError(f"Missing prediction file: {p}")
 
     if sacrebleu is None:
-        print("[WARN] sacrebleu import failed. SacreBLEU will be N/A.")
-        print("       Install with: pip install sacrebleu")
+        print(" sacrebleu import failed. SacreBLEU will be N/A.")
+        print("  Install with: pip install sacrebleu")
 
     results = [evaluate_file(p) for p in pred_paths]
     print_table(results)

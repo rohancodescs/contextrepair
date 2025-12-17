@@ -2,9 +2,7 @@
 """
 step5g_summarize_labels.py
 
-Summarize labeled error analysis sheet (CSV or XLSX).
-Outputs counts for label_who_failed and label_error_type, plus a small table.
-
+Summarize labeled error analysis sheet (CSV or XLSX), returns counts for label_who_failed and label_error_type, plus a small table.
 Run:
   python step5g_summarize_labels.py --in_file outputs/predictions/bart_debug/error_sheet_val_trigger_80_labeled.xlsx
 """

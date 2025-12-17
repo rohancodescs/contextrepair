@@ -7,30 +7,25 @@ Train BART-base generator (Task II) using:
 - retrieved_train_q2_k{K}.jsonl (precomputed BM25 top-k for train, Q2 baseline)
 - For val (and any missing train ids), BM25 fallback retrieval using Q2 concat
 
-Designed for 8GB VRAM:
+Designed for my GPU (RTX 4060 Ti with 8GB VRAM):
 - fp16
 - batch_size=1 default
 - gradient accumulation
 - optional gradient checkpointing
 - per-passage truncation to control input length with k=5
 
-Debug run (recommended first):
+How to run (ensure functionality) : 
   python step3_train_bart_generator.py --data_dir ./data --k 5 ^
     --limit_train 2000 --limit_val 500 --epochs 1 ^
     --output_dir ./outputs/bart_debug ^
     --batch_size 1 --grad_accum 8 --max_source_len 512 --max_passage_tokens 80 ^
     --gradient_checkpointing
 
-After you complete full caching:
+Run for FULL CACHEING (did not achieve due to limited system resources):
   python step3_train_bart_generator.py --data_dir ./data --k 5 ^
     --epochs 3 --output_dir ./outputs/bart_full ^
     --batch_size 1 --grad_accum 8 --max_source_len 512 --max_passage_tokens 80 ^
     --gradient_checkpointing
-
-If you OOM:
-  - reduce --max_source_len to 384
-  - or reduce --max_passage_tokens to 60
-  - or reduce --k to 3 (later)
 """
 
 from __future__ import annotations
@@ -64,10 +59,12 @@ TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 
 # IO helper func
+# Ensures the provided directory exists.
 def safe_mkdir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
+# Streams JSON objects from a newline-delimited JSON file.
 def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -77,6 +74,7 @@ def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
             yield json.loads(line)
 
 
+# Loads JSONL rows into memory, optionally truncating for debugging.
 def load_jsonl(path: Path, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for i, row in enumerate(iter_jsonl(path)):
@@ -86,10 +84,12 @@ def load_jsonl(path: Path, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     return out
 
 
+# Applies the regex tokenizer used for BM25 scoring.
 def tokenize_bm25(text: str) -> List[str]:
     return TOKEN_RE.findall(text.lower())
 
 
+# Returns the top-k (index, score) pairs from a BM25 score vector.
 def topk_indices_and_scores(scores: Any, k: int) -> List[Tuple[int, float]]:
     """
     Return [(idx, score), ...] sorted desc, length k.
@@ -115,6 +115,7 @@ def topk_indices_and_scores(scores: Any, k: int) -> List[Tuple[int, float]]:
 
 
 # building queries
+# Builds the Q2 concat retrieval query from history and user input.
 def build_query_q2_concat(history: List[Dict[str, Any]], user_turn: str, max_turns_concat: int = 6) -> str:
     parts: List[str] = []
     hist_tail = history[-max_turns_concat:] if max_turns_concat > 0 else history
@@ -137,6 +138,7 @@ class PassageStore:
     bm25: BM25Okapi
 
 
+# Loads passages, tokenizes them, and constructs a BM25 store.
 def load_passages_and_build_bm25(passages_jsonl: Path) -> PassageStore:
     passage_ids: List[str] = []
     passage_texts: List[str] = []
@@ -155,6 +157,7 @@ def load_passages_and_build_bm25(passages_jsonl: Path) -> PassageStore:
     return PassageStore(passage_ids=passage_ids, passage_texts=passage_texts, passage_id_to_text=pid_to_text, bm25=bm25)
 
 
+# Retrieves top passage ids for a query using the BM25 store.
 def bm25_retrieve_pids(
     store: PassageStore,
     query: str,
@@ -166,6 +169,7 @@ def bm25_retrieve_pids(
 
 
 # retrieval cache loader (training)
+# Loads the precomputed BM25 cache mapping example ids to passage ids.
 def load_train_retrieval_cache(cache_jsonl: Path) -> Dict[str, List[str]]:
     """
     Map example_id -> list of passage_ids (ordered).
@@ -188,6 +192,7 @@ def load_train_retrieval_cache(cache_jsonl: Path) -> Dict[str, List[str]]:
 
 
 # format for input
+# Truncates text using a tokenizer-level token budget.
 def truncate_text_to_tokens(tokenizer: Any, text: str, max_tokens: int) -> str:
     """
     Truncate raw text to at most max_tokens (tokenizer tokens).
@@ -201,6 +206,7 @@ def truncate_text_to_tokens(tokenizer: Any, text: str, max_tokens: int) -> str:
     return tokenizer.decode(ids, skip_special_tokens=True)
 
 
+# Builds the formatted seq2seq prompt including history and evidence.
 def format_model_input(
     tokenizer: Any,
     history: List[Dict[str, Any]],
@@ -248,6 +254,7 @@ def format_model_input(
 
 # dataset
 class GenDataset(torch.utils.data.Dataset):
+    # Initializes dataset storage and attaches retrieval evidence.
     def __init__(
         self,
         *,
@@ -279,6 +286,7 @@ class GenDataset(torch.utils.data.Dataset):
         self._evidence_pids: List[List[str]] = []
         self._attach_evidence()
 
+    # Attaches BM25 evidence passage ids to each example at init time.
     def _attach_evidence(self) -> None:
         use_tqdm = tqdm is not None
         it = tqdm(self.examples, desc=f"Attach evidence ({self.split_name})") if use_tqdm else self.examples
@@ -302,11 +310,13 @@ class GenDataset(torch.utils.data.Dataset):
             self._evidence_pids.append(list(pids)[: self.k])
 
         if missing > 0:
-            print(f"[WARN] {missing} train examples missing retrieval cache and require_cache=True. They will have empty evidence.")
+            print(f"ISSUE MAYBE {missing} train examples missing retrieval cache and require_cache=True. They will have empty evidence.")
 
+    # Returns the number of examples.
     def __len__(self) -> int:
         return len(self.examples)
 
+    # Tokenizes a single example into seq2seq inputs and labels.
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         ex = self.examples[idx]
         history = ex["history"]
@@ -339,6 +349,7 @@ class GenDataset(torch.utils.data.Dataset):
 
 
 # seeding
+# Sets random seeds for python, numpy, and torch.
 def set_seed(seed: int) -> None:
     random.seed(seed)
     try:
@@ -352,7 +363,7 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-# main
+# Parses CLI args, prepares data, and launches BART training.
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=str, default="data")
@@ -378,7 +389,7 @@ def main() -> None:
     ap.add_argument("--limit_train", type=int, default=0)
     ap.add_argument("--limit_val", type=int, default=0)
 
-    ap.add_argument("--require_train_cache", action="store_true", help="If set, missing train cache => empty evidence (no fallback).")
+    ap.add_argument("--require_train_cache", action="store_true", help="If set, missing train cache => empty evidence")
     ap.add_argument("--gradient_checkpointing", action="store_true")
     ap.add_argument("--no_fp16", action="store_true")
 
@@ -398,7 +409,7 @@ def main() -> None:
 
     for p in [examples_train_path, examples_val_path, passages_path]:
         if not p.exists():
-            raise FileNotFoundError(f"Missing required file: {p}. Did you run step1 + step2?")
+            raise FileNotFoundError(f"Missing required file: {p}. make sure you run step1 and step2")
 
     print("Loading passages + building BM25...")
     store = load_passages_and_build_bm25(passages_path)
@@ -495,7 +506,7 @@ def main() -> None:
         data_collator=collator,
     )
 
-    # training using ^^^
+    # training using above^^^
     print("\nStarting training...")
     trainer.train()
 
@@ -509,8 +520,6 @@ def main() -> None:
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(vars(args), f, indent=2)
     print("Saved:", cfg_path)
-
-    print("\nDone. Next file: generation script to run Q1/Q2/Q3/Q4 and save predictions for scoring.")
 
 
 if __name__ == "__main__":

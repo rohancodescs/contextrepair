@@ -46,14 +46,12 @@ except Exception:
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
-
-# -------------------------
-# IO helpers
-# -------------------------
+#IO helpers snsures the directory exists before writing files.
 def safe_mkdir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
+# Streams dictionaries from a JSONL file.
 def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -63,6 +61,7 @@ def iter_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
             yield json.loads(line)
 
 
+# Loads all JSONL rows into a list with an optional limit.
 def load_jsonl(path: Path, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for i, row in enumerate(iter_jsonl(path)):
@@ -72,6 +71,7 @@ def load_jsonl(path: Path, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     return out
 
 
+# Appends rows to a JSONL file, creating parent dirs as needed.
 def append_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
     safe_mkdir(path.parent)
     with open(path, "a", encoding="utf-8") as f:
@@ -79,13 +79,13 @@ def append_jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
-# -------------------------
-# BM25 helpers
-# -------------------------
+
+# BM25 helpers which run the regex tokenizer shared with BM25 scoring.
 def tokenize_bm25(text: str) -> List[str]:
     return TOKEN_RE.findall(text.lower())
 
 
+# Returns the top-k indices and scores from a BM25 score array.
 def topk_indices_and_scores(scores: Any, k: int) -> List[Tuple[int, float]]:
     """
     Return [(idx, score), ...] sorted desc, length k.
@@ -110,6 +110,7 @@ def topk_indices_and_scores(scores: Any, k: int) -> List[Tuple[int, float]]:
     return [(i, float(scores[i])) for i in ranked]
 
 
+# Loads passage ids, doc ids, and texts from JSONL.
 def load_passages(passages_jsonl: Path) -> Tuple[List[str], List[str], List[str]]:
     """
     Returns (passage_ids, doc_ids, texts)
@@ -126,13 +127,13 @@ def load_passages(passages_jsonl: Path) -> Tuple[List[str], List[str], List[str]
     return pids, doc_ids, texts
 
 
-# -------------------------
-# Query modes
-# -------------------------
+
+# Query is built; the Q1 retrieval query using only the latest user turn.
 def build_query_q1(user_turn: str) -> str:
     return user_turn.strip()
 
 
+# Builds the Q2 concat retrieval query from history + user turn.
 def build_query_q2_concat(history: List[Dict[str, Any]], user_turn: str, max_turns_concat: int = 6) -> str:
     parts: List[str] = []
     hist_tail = history[-max_turns_concat:] if max_turns_concat > 0 else history
@@ -145,6 +146,7 @@ def build_query_q2_concat(history: List[Dict[str, Any]], user_turn: str, max_tur
     return " ".join(parts)
 
 
+# Dispatches to the requested query mode and validates inputs.
 def build_query(mode: str, history: List[Dict[str, Any]], user_turn: str, max_turns_concat: int) -> str:
     mode = mode.lower().strip()
     if mode == "q1":
@@ -156,9 +158,7 @@ def build_query(mode: str, history: List[Dict[str, Any]], user_turn: str, max_tu
     raise ValueError(f"Unknown mode: {mode}")
 
 
-# -------------------------
-# Formatting (must match training)
-# -------------------------
+# Formatting; Truncates text by tokenizer tokens to build evidence snippets.
 def truncate_text_to_tokens(tokenizer: Any, text: str, max_tokens: int) -> str:
     if max_tokens <= 0:
         return ""
@@ -169,6 +169,7 @@ def truncate_text_to_tokens(tokenizer: Any, text: str, max_tokens: int) -> str:
     return tokenizer.decode(ids, skip_special_tokens=True)
 
 
+# Formats the seq2seq prompt used during BART training.
 def format_model_input(
     tokenizer: Any,
     history: List[Dict[str, Any]],
@@ -209,10 +210,9 @@ def format_model_input(
     )
 
 
-# -------------------------
 # Batch generation
-# -------------------------
 @torch.inference_mode()
+# Generates a batch of predictions from prompts using beam search.
 def generate_batch(
     model: BartForConditionalGeneration,
     tokenizer: Any,
@@ -239,10 +239,7 @@ def generate_batch(
     )
     return tokenizer.batch_decode(out_ids, skip_special_tokens=True)
 
-
-# -------------------------
-# Main
-# -------------------------
+#Main() : Parses CLI args and runs the retrieval + generation workflow
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=str, default="data")
@@ -287,7 +284,7 @@ def main() -> None:
     if out_path.exists() and args.overwrite:
         out_path.unlink()
     if out_path.exists():
-        print(f"[WARN] Output exists: {out_path}")
+        print(f" Output exists: {out_path}")
         print("Use --overwrite to regenerate.")
         return
 
@@ -381,7 +378,7 @@ def main() -> None:
             prompts = []
             meta = []
 
-    # Flush leftovers
+    # get rid of leftovers
     if prompts:
         preds = generate_batch(
             model,
@@ -405,7 +402,7 @@ def main() -> None:
         append_jsonl(out_path, buf)
 
     print("\nSaved predictions to:", out_path)
-    print("Next file: scoring script for EM / token-F1 / SacreBLEU.")
+    
 
 
 if __name__ == "__main__":

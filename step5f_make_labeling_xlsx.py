@@ -14,7 +14,6 @@ Run:
 """
 
 from __future__ import annotations
-
 import argparse
 import csv
 import re
@@ -29,7 +28,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 
-# ---------- EM/F1 normalization ----------
+#EM/F1 normalization
 _ARTICLES = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
 _PUNCT_TABLE = str.maketrans("", "", string.punctuation)
 _WS = re.compile(r"\s+")
@@ -82,7 +81,7 @@ def main() -> None:
     if not rows:
         raise RuntimeError("CSV has 0 data rows.")
 
-    # Auto-detect baseline/improved columns from prediction__*
+    # Auto-detect baseline/improved columns from prediction
     pred_cols = [c for c in header if c.startswith("prediction__")]
     if len(pred_cols) < 2:
         raise RuntimeError(f"Expected at least 2 prediction__* columns, found {pred_cols}")
@@ -92,7 +91,7 @@ def main() -> None:
     base_suffix = base_pred_col[len("prediction__"):]
     imp_suffix = imp_pred_col[len("prediction__"):]
 
-    # Related columns (if they exist)
+    # Related columns 
     base_doc_col = f"doc_hit__{base_suffix}"
     base_span_col = f"span_hit__{base_suffix}"
     imp_doc_col = f"doc_hit__{imp_suffix}"
