@@ -2,23 +2,22 @@
 """
 step0_bootstrap.py
 
-Bootstrap script for the project:
+This is the initial setup / step 0 in this project which is the bootstrap script, it:
 - Checks GPU + key imports
-- Downloads MultiDoc2Dial zip from official site
-- Extracts it
+- Downloads MultiDoc2Dial zip from official site and extracts it
 - Locates and loads the core JSON files (docs + dialogue train/validation)
 - Prints stats + a few example turns
-- Optionally downloads CANARD (Wiki-augmented) via HuggingFace datasets and prints a sample
+- Can download CANARD (Wiki-augmented) via HuggingFace datasets and prints a sample
 
 Run:
   python step0_bootstrap.py --data_dir ./data
 
-Optional:
+You can skip the canard dataset via this CLI parameter:
   python step0_bootstrap.py --data_dir ./data --skip_canard
 """
 
+#imports
 from __future__ import annotations
-
 import argparse
 import json
 import os
@@ -33,10 +32,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.request import urlopen, Request
 
-
+# multidoc2dial link
 MULTIDOC2DIAL_ZIP_URL = "https://doc2dial.github.io/multidoc2dial/file/multidoc2dial.zip"
 
-
+# Prints a horizontal rule banner to separate console sections.
 def hr(msg: str = "", width: int = 88) -> None:
     if msg:
         pad = max(0, width - len(msg) - 2)
@@ -44,11 +43,11 @@ def hr(msg: str = "", width: int = 88) -> None:
     else:
         print("\n" + "=" * width)
 
-
+# Creates the given directory path if it does not already exist.
 def safe_mkdir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
-
+# Converts a byte count into a human-readable size string.
 def sizeof_fmt(num_bytes: float) -> str:
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if num_bytes < 1024.0:
@@ -56,7 +55,7 @@ def sizeof_fmt(num_bytes: float) -> str:
         num_bytes /= 1024.0
     return f"{num_bytes:.1f} PB"
 
-
+# Downloads the URL to disk while showing progress and skipping completed files.
 def download_with_progress(url: str, dst: Path, chunk_size: int = 1024 * 1024) -> None:
   
     safe_mkdir(dst.parent)
@@ -100,6 +99,7 @@ def download_with_progress(url: str, dst: Path, chunk_size: int = 1024 * 1024) -
         print(f"[download] Done: {dst} ({sizeof_fmt(dst.stat().st_size)})")
 
 
+# Extracts the zip file into a directory and drops a marker to avoid rework.
 def extract_zip(zip_path: Path, extract_dir: Path) -> None:
     safe_mkdir(extract_dir)
     marker = extract_dir / ".extracted_ok"
@@ -114,6 +114,7 @@ def extract_zip(zip_path: Path, extract_dir: Path) -> None:
     print("[extract] Done.")
 
 
+# Finds the first JSON file whose name matches any of the provided patterns.
 def find_first_file(root: Path, patterns: List[str]) -> Optional[Path]:
   
     compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
@@ -124,11 +125,13 @@ def find_first_file(root: Path, patterns: List[str]) -> Optional[Path]:
     return None
 
 
+# Loads and parses JSON data from disk using UTF-8 encoding.
 def load_json(path: Path) -> Any:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
+# Normalizes whitespace and truncates text to a specified maximum length.
 def summarize_text(s: str, max_len: int = 220) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     if len(s) <= max_len:
@@ -137,6 +140,7 @@ def summarize_text(s: str, max_len: int = 220) -> str:
 
 
 # check environments
+# Verifies presence of critical libraries plus CUDA and spaCy prerequisites.
 def check_environment() -> None:
     hr("Environment Check")
 
@@ -152,7 +156,7 @@ def check_environment() -> None:
             missing.append((pkg, str(e)))
 
     if missing:
-        print("\n[WARN] Missing imports:")
+        print("\n Missing imports:")
         for pkg, err in missing:
             print(f"  - {pkg}: {err}")
         print("\nInstall suggestions (adjust as needed):")
@@ -160,7 +164,7 @@ def check_environment() -> None:
         print("  pip install transformers datasets evaluate sacrebleu spacy rank_bm25 tqdm")
         print("  python -m spacy download en_core_web_sm")
     else:
-        print("[OK] Core imports look good.")
+        print(" Core imports look good.")
 
     # try torch/gpu
     try:
@@ -177,11 +181,11 @@ def check_environment() -> None:
             x = torch.randn(1024, 1024, device="cuda", dtype=torch.float16)
             y = (x @ x.T).mean()
             _ = y.item()
-            print("[OK] CUDA matmul sanity check passed.")
+            print(" CUDA matmul sanity check passed.")
         else:
-            print("[WARN] CUDA not available. You can still run CPU, but training will be slow.")
+            print(" CUDA not available. You can still run CPU, but training will be slow.")
     except Exception as e:
-        print(f"[WARN] Torch/CUDA check failed: {e}")
+        print(f" Torch/CUDA check failed: {e}")
 
     
     try:
@@ -189,9 +193,9 @@ def check_environment() -> None:
 
         try:
             _ = spacy.load("en_core_web_sm")
-            print("[OK] spaCy model en_core_web_sm is available.")
+            print(" spaCy model en_core_web_sm is available.")
         except Exception:
-            print("[WARN] spaCy model en_core_web_sm not found.")
+            print(" spaCy model en_core_web_sm not found.")
             print("  Run: python -m spacy download en_core_web_sm")
     except Exception:
         pass
@@ -208,6 +212,7 @@ class MultiDoc2DialPaths:
     dial_val_json: Path
 
 
+# Downloads, extracts, and locates the primary MultiDoc2Dial dataset files.
 def bootstrap_multidoc2dial(data_dir: Path) -> MultiDoc2DialPaths:
     hr("MultiDoc2Dial Download + Verify")
 
@@ -253,9 +258,9 @@ def bootstrap_multidoc2dial(data_dir: Path) -> MultiDoc2DialPaths:
         print("\nTip: list extracted files and check naming. If needed, we'll adjust patterns.")
         raise SystemExit(1)
 
-    print(f"[OK] docs_json:      {docs_json}")
-    print(f"[OK] dial_train:    {dial_train_json}")
-    print(f"[OK] dial_val:      {dial_val_json}")
+    print(f" docs_json:      {docs_json}")
+    print(f" dial_train:    {dial_train_json}")
+    print(f" dial_val:      {dial_val_json}")
 
     return MultiDoc2DialPaths(
         root=data_dir,
@@ -267,6 +272,7 @@ def bootstrap_multidoc2dial(data_dir: Path) -> MultiDoc2DialPaths:
     )
 
 
+# Loads dataset JSON files and prints dataset stats plus a sample dialogue.
 def inspect_multidoc2dial(paths: MultiDoc2DialPaths, max_dialogues_print: int = 1) -> None:
     hr("MultiDoc2Dial Inspect")
 
@@ -285,6 +291,7 @@ def inspect_multidoc2dial(paths: MultiDoc2DialPaths, max_dialogues_print: int = 
     else:
         print(f"Docs: unexpected type: {type(docs)}")
 
+    # Counts the number of dialogues and turns across heterogeneous structures.
     def count_dialogues(dials_obj: Any) -> Tuple[int, int]:
         # returns (num_dialogues, num_turns)
         n_d = 0
@@ -324,7 +331,7 @@ def inspect_multidoc2dial(paths: MultiDoc2DialPaths, max_dialogues_print: int = 
     print(f"Dialogues train: {n_train_d} | turns: {n_train_t}")
     print(f"Dialogues  val:  {n_val_d} | turns: {n_val_t}")
 
-    # get one sample dialogue for check
+    # Retrieves the first dialogue dictionary regardless of layout variations.
     def get_first_dialogue(dials_obj: Any) -> Optional[Dict[str, Any]]:
         if isinstance(dials_obj, dict):
             for _, dom_val in dials_obj.items():
@@ -347,17 +354,17 @@ def inspect_multidoc2dial(paths: MultiDoc2DialPaths, max_dialogues_print: int = 
 
     sample = get_first_dialogue(dial_train)
     if not sample:
-        print("[WARN] Could not find a sample dialogue to print.")
+        print(" Could not find a sample dialogue to print.")
         return
     
     if not isinstance(sample, dict):
-        print("[WARN] Sample dialogue is not a dict, skipping print.")
+        print(" Sample dialogue is not a dict, skipping print.")
         return
 
     print("\nSample dialogue id:", sample.get("dial_id", "<no dial_id>"))
     turns = sample.get("turns", [])
     if not isinstance(turns, list):
-        print("[WARN] Turns is not a list, skipping turn details.")
+        print(" Turns is not a list, skipping turn details.")
         return
     print(f"Turns in sample: {len(turns)}")
     for t in turns[: min(8, len(turns))]:
@@ -371,17 +378,18 @@ def inspect_multidoc2dial(paths: MultiDoc2DialPaths, max_dialogues_print: int = 
             # print first ref
             r0 = refs[0]
             if isinstance(r0, dict):
-                print(f"      refs[0]: doc_id={r0.get('doc_id')} id_sp={r0.get('id_sp')} label={r0.get('label')}")
+                print(f" refs[0]: doc_id={r0.get('doc_id')} id_sp={r0.get('id_sp')} label={r0.get('label')}")
 
 
 
+# Loads the CANARD dataset via HuggingFace and showcases a sample entry.
 def inspect_canard(data_dir: Path) -> None:
     hr("CANARD (Wiki-augmented) Inspect")
 
     try:
         from datasets import load_dataset  
     except Exception as e:
-        print(f"[WARN] datasets not available: {e}")
+        print(f" datasets not available: {e}")
         return
 
     
@@ -392,7 +400,7 @@ def inspect_canard(data_dir: Path) -> None:
     ds_test = load_dataset(name, split="test")
 
     print(f"CANARD train rows: {len(ds_train)}")
-    print(f"CANARD test  rows: {len(ds_test)}")
+    print(f"CANARD test rows: {len(ds_test)}")
 
     ex = ds_train[0]
     hist = ex.get("History", [])
@@ -408,7 +416,7 @@ def inspect_canard(data_dir: Path) -> None:
     print("Rewrite: ", summarize_text(rw, 200))
 
 
-# main
+# Parses CLI options and runs the workflow end-to-end
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=str, default="data", help="Where to store downloaded/unzipped data.")
@@ -427,7 +435,6 @@ def main() -> None:
         inspect_canard(data_dir)
 
     hr("Bootstrap Complete")
-    print("Next file we'll implement: passage chunking + BM25 index builder (k=5 friendly).")
 
 
 if __name__ == "__main__":

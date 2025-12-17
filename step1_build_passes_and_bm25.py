@@ -1,21 +1,17 @@
-#!/usr/bin/env python3
 """
 step1_build_passages_and_bm25.py
 
-Build passage corpus (structure-aware sections from MultiDoc2Dial spans)
-+ BM25 index, then run a quick retrieval sanity evaluation.
+Builds the passage corpus (structure-aware sections from MultiDoc2Dial) + BM25 index, then run a quick retrieval for evaluation.
 
-Run:
-  python step1_build_passages_and_bm25.py --data_dir ./data --k 5
+To run the file: python step1_build_passages_and_bm25.py --data_dir ./data --k 5
 
-Outputs:
+Outputs (in outputs folder):
   data/processed/passages.jsonl
   data/processed/passage_meta.json
   data/indices/bm25_index.pkl
 
 Notes:
-- We build passages by grouping spans by (doc_id, id_sec) and using text_sec.
-- This makes span-level recall@k easy later (great for analysis & debugging).
+- We build passages by grouping spans by (doc_id, id_sec) and using text_se, which makes span-level recall@k easy later
 """
 
 from __future__ import annotations
@@ -31,25 +27,29 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from rank_bm25 import BM25Okapi  
 
-
+#regex
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 
+# Creates the directory path if it does not already exist.
 def safe_mkdir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
+# Loads JSON data from disk.
 def load_json(path: Path) -> Any:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
+# Writes a Python object to disk as JSON.
 def write_json(path: Path, obj: Any) -> None:
     safe_mkdir(path.parent)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
 
 
+# Streams an iterable of dictionaries to a JSONL file.
 def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
     safe_mkdir(path.parent)
     with open(path, "w", encoding="utf-8") as f:
@@ -57,10 +57,12 @@ def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
+# Performs a simple lowercase alphanumeric tokenization.
 def tokenize(text: str) -> List[str]:
     return TOKEN_RE.findall(text.lower())
 
 
+# Recursively finds the first JSON file whose name matches the specified pattern.
 def find_first_file(root: Path, patterns: List[str]) -> Optional[Path]:
     compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
     for p in root.rglob("*.json"):
@@ -70,6 +72,7 @@ def find_first_file(root: Path, patterns: List[str]) -> Optional[Path]:
     return None
 
 
+# Locates the docs/train/val JSON files produced by step0.
 def locate_multidoc2dial_files(data_dir: Path) -> Tuple[Path, Path, Path]:
     # find docs/train/val json files in ~/raw/
     raw_dir = data_dir / "raw"
@@ -97,13 +100,14 @@ def locate_multidoc2dial_files(data_dir: Path) -> Tuple[Path, Path, Path]:
     return docs_json, dial_train_json, dial_val_json
 
 
-# parsing using multidoc2dial
+# pulls nested dict contents if the target key exists.
 def unwrap_if_key(obj: Any, key: str) -> Any:
     if isinstance(obj, dict) and key in obj:
         return obj[key]
     return obj
 
 
+# Loads MultiDoc2Dial documents and indexes them by domain/doc_id.
 def load_docs(docs_json: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
     raw = load_json(docs_json)
     raw = unwrap_if_key(raw, "doc_data")
@@ -125,15 +129,14 @@ def load_docs(docs_json: Path) -> Dict[str, Dict[str, Dict[str, Any]]]:
         else:
             docs_by_domain[str(domain)] = {str(doc_id): doc for doc_id, doc in v.items() if isinstance(doc, dict)}
 
-    # need docs here
     total_docs = sum(len(x) for x in docs_by_domain.values())
     if total_docs == 0:
         raise ValueError("Parsed 0 documents. Check docs_json format.")
     return docs_by_domain
 
 
+# Loads dialogue JSON and returns a consistent domain to dialogues mapping
 def load_dialogues(dial_json: Path) -> Dict[str, List[Dict[str, Any]]]:
-
     raw = load_json(dial_json)
     raw = unwrap_if_key(raw, "dial_data")
     if not isinstance(raw, dict):
@@ -150,6 +153,7 @@ def load_dialogues(dial_json: Path) -> Dict[str, List[Dict[str, Any]]]:
     return out
 
 
+# returns agent-referenced examples with history and gold doc/span ids
 def iter_agent_examples(
     dialogues_by_domain: Dict[str, List[Dict[str, Any]]],
     history_turns: int = 6,
@@ -346,9 +350,11 @@ class RecallStats:
     doc_hits: int = 0
     span_hits: int = 0
 
+    # gets document-level recall from accumulated stats.
     def doc_recall(self) -> float:
         return self.doc_hits / self.n if self.n else 0.0
 
+    # gets span-level recall from accumulated stats.
     def span_recall(self) -> float:
         return self.span_hits / self.n if self.n else 0.0
 
@@ -450,7 +456,7 @@ def main() -> None:
         else:
             print("sample turns not a list; check format.")
     else:
-        print("[WARN] No sample dialogue found.")
+        print("ISSUE HERE: No sample dialogue found.")
 
     # for passages
     print("\nBuilding section passages from spans...")
@@ -521,9 +527,8 @@ def main() -> None:
     r_q2 = eval_recall(index, eval_subset, k=args.k, mode="q2")
 
     print("\n--- Recall@k sanity check (subset) ---")
-    print(f"Q1 (user turn only):    doc_recall@{args.k}={r_q1.doc_recall():.3f}  span_recall@{args.k}={r_q1.span_recall():.3f}")
-    print(f"Q2 (concat history):    doc_recall@{args.k}={r_q2.doc_recall():.3f}  span_recall@{args.k}={r_q2.span_recall():.3f}")
-    print("\nNext file: build Task-II training examples + retrieval precompute for generator training.")
+    print(f"Q1 (user turn only): doc_recall@{args.k}={r_q1.doc_recall():.3f}  span_recall@{args.k}={r_q1.span_recall():.3f}")
+    print(f"Q2 (concat history): doc_recall@{args.k}={r_q2.doc_recall():.3f}  span_recall@{args.k}={r_q2.span_recall():.3f}")
 
 
 if __name__ == "__main__":
