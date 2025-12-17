@@ -30,20 +30,18 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from rank_bm25 import BM25Okapi  # type: ignore
+from rank_bm25 import BM25Okapi  
 
 try:
-    from tqdm import tqdm  # type: ignore
-except Exception:  # pragma: no cover
+    from tqdm import tqdm  
+except Exception:  
     tqdm = None
 
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 
-# -------------------------
-# Basic IO helpers
-# -------------------------
+# IO helper func
 def safe_mkdir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
@@ -85,10 +83,6 @@ def find_first_file(root: Path, patterns: List[str]) -> Optional[Path]:
 
 
 def locate_multidoc2dial_dialogue_files(data_dir: Path) -> Tuple[Path, Path, Optional[Path]]:
-    """
-    Locate train/val/test dialogue json under data_dir/raw/**.
-    Returns (train_json, val_json, test_json_or_None)
-    """
     raw_dir = data_dir / "raw"
     if not raw_dir.exists():
         raise FileNotFoundError(f"Expected {raw_dir} to exist. Did you run step0_bootstrap.py?")
@@ -109,10 +103,7 @@ def unwrap_if_key(obj: Any, key: str) -> Any:
 
 
 def load_dialogues_by_domain(dial_json: Path) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Returns: dialogues_by_domain[domain] = [dialogue_obj, ...]
-    Handles wrapper {"dial_data": {...}}.
-    """
+
     raw = load_json(dial_json)
     raw = unwrap_if_key(raw, "dial_data")
     if not isinstance(raw, dict):
@@ -129,18 +120,14 @@ def load_dialogues_by_domain(dial_json: Path) -> Dict[str, List[Dict[str, Any]]]
     return out
 
 
-# -------------------------
-# Passage + BM25 helpers
-# -------------------------
+# passage helper
+# bm25 helper
 def tokenize(text: str) -> List[str]:
     return TOKEN_RE.findall(text.lower())
 
 
 def load_passages(passages_jsonl: Path) -> Tuple[List[str], List[str], List[str], List[Set[str]]]:
-    """
-    Returns parallel arrays:
-      passage_ids, doc_ids, texts, span_sets
-    """
+
     pids: List[str] = []
     doc_ids: List[str] = []
     texts: List[str] = []
@@ -169,12 +156,9 @@ def build_bm25(texts: List[str]) -> BM25Okapi:
 
 
 def topk_indices_and_scores(scores: Any, k: int) -> List[Tuple[int, float]]:
-    """
-    Given scores array-like, return [(idx, score), ...] sorted desc, length k.
-    Uses numpy if available; falls back to pure python.
-    """
+
     try:
-        import numpy as np  # type: ignore
+        import numpy as np  
 
         if isinstance(scores, np.ndarray):
             k_eff = min(k, scores.shape[0])
@@ -193,17 +177,12 @@ def topk_indices_and_scores(scores: Any, k: int) -> List[Tuple[int, float]]:
     return [(i, float(scores[i])) for i in ranked]
 
 
-# -------------------------
-# Build Task-II generation examples
-# -------------------------
+# task-II generation examples (from dialouges)
 def build_examples_from_dialogues(
     dialogues_by_domain: Dict[str, List[Dict[str, Any]]],
     history_turns: int = 6,
 ) -> List[Dict[str, Any]]:
-    """
-    For each agent turn with references, align to nearest preceding user turn.
-    Output example JSON objects.
-    """
+
     examples: List[Dict[str, Any]] = []
 
     for domain, dials in dialogues_by_domain.items():
@@ -262,9 +241,9 @@ def build_examples_from_dialogues(
                         "domain": domain,
                         "dial_id": dial_id,
                         "agent_turn_index": i,
-                        "history": history,               # up to history_turns turns
-                        "user_turn": user_turn,           # current user turn
-                        "target": agent_turn,             # agent response to generate
+                        "history": history, # max is history_turns turns
+                        "user_turn": user_turn, # current user turn
+                        "target": agent_turn, # agent response to generate
                         "gold_doc_ids": sorted(gold_doc_ids),
                         "gold_span_ids": sorted(gold_span_ids),
                     }
@@ -288,9 +267,8 @@ def build_query_q2_concat(history: List[Dict[str, Any]], user_turn: str, max_tur
     return " ".join(parts)
 
 
-# -------------------------
-# Precompute retrieval cache
-# -------------------------
+
+# retrieval cache before compute
 def load_done_example_ids(cache_path: Path) -> Set[str]:
     done: Set[str] = set()
     if not cache_path.exists():
@@ -315,10 +293,6 @@ def precompute_retrieval_cache(
     resume: bool,
     limit: Optional[int],
 ) -> None:
-    """
-    Writes JSONL records:
-      {example_id, query_q2, retrieved:[{passage_id, doc_id, score}], doc_hit, span_hit}
-    """
     safe_mkdir(out_path.parent)
 
     done_ids: Set[str] = set()
@@ -331,7 +305,6 @@ def precompute_retrieval_cache(
     if limit is not None:
         iterable = examples[:limit]
 
-    # Progress
     use_tqdm = tqdm is not None
     it = tqdm(iterable, desc=f"BM25 cache (k={k})") if use_tqdm else iterable
 
@@ -340,10 +313,10 @@ def precompute_retrieval_cache(
     span_hits = 0
     total = 0
 
-    # Stream append
+    # append
     buffer: List[Dict[str, Any]] = []
 
-    for ex in it:  # type: ignore
+    for ex in it: 
         ex_id = str(ex["example_id"])
         if resume and ex_id in done_ids:
             continue
@@ -385,7 +358,7 @@ def precompute_retrieval_cache(
             }
         )
 
-        # Flush buffer periodically
+        # flush buffer
         if len(buffer) >= 250:
             append_jsonl(out_path, buffer)
             written += len(buffer)
@@ -402,9 +375,7 @@ def precompute_retrieval_cache(
         print("[cache] Nothing new was cached (maybe everything was already done).")
 
 
-# -------------------------
-# Main
-# -------------------------
+# main
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=str, default="data")
@@ -422,13 +393,13 @@ def main() -> None:
     processed_dir = data_dir / "processed"
     safe_mkdir(processed_dir)
 
-    # 1) locate dialogues
+    # find dialogues
     train_json, val_json, test_json = locate_multidoc2dial_dialogue_files(data_dir)
     print("train_json:", train_json)
     print("val_json:  ", val_json)
     print("test_json: ", test_json if test_json else "(not found)")
 
-    # 2) load dialogues
+    # load them
     train_by_domain = load_dialogues_by_domain(train_json)
     val_by_domain = load_dialogues_by_domain(val_json)
     test_by_domain: Optional[Dict[str, List[Dict[str, Any]]]] = None
@@ -441,7 +412,7 @@ def main() -> None:
     if test_by_domain is not None:
         print("  test: ", sum(len(v) for v in test_by_domain.values()))
 
-    # 3) build examples
+    # build some examples
     print("\nBuilding Task-II examples (agent turns with references)...")
     ex_train = build_examples_from_dialogues(train_by_domain, history_turns=args.history_turns)
     ex_val = build_examples_from_dialogues(val_by_domain, history_turns=args.history_turns)
@@ -451,7 +422,7 @@ def main() -> None:
 
     print(f"Examples: train={len(ex_train)} val={len(ex_val)} test={len(ex_test) if test_by_domain is not None else 'N/A'}")
 
-    # 4) write examples
+    # then write them out 
     train_out = processed_dir / "examples_train.jsonl"
     val_out = processed_dir / "examples_val.jsonl"
     test_out = processed_dir / "examples_test.jsonl"
@@ -465,7 +436,7 @@ def main() -> None:
     if test_by_domain is not None:
         print(f"  {test_out}")
 
-    # 5) load passages
+    # load the passages
     passages_path = processed_dir / "passages.jsonl"
     if not passages_path.exists():
         raise FileNotFoundError(f"Expected passages at {passages_path}. Run step1_build_passages_and_bm25.py first.")
@@ -473,7 +444,7 @@ def main() -> None:
     passage_ids, passage_doc_ids, passage_texts, passage_span_sets = load_passages(passages_path)
     print(f"Loaded passages: {len(passage_ids)}")
 
-    # 6) save passage lookup (for training scripts later)
+    # save lookup path for passages
     lookup_path = processed_dir / "passage_lookup.pkl"
     if not lookup_path.exists():
         print("Saving passage_lookup.pkl ...")
@@ -487,12 +458,12 @@ def main() -> None:
     else:
         print("Found existing:", lookup_path)
 
-    # 7) build BM25 fresh (fast; avoids pickle class issues)
+    # build fresh bm25
     print("\nBuilding BM25 from passages (this is fast)...")
     bm25 = build_bm25(passage_texts)
     print("BM25 ready.")
 
-    # 8) precompute retrieval cache for TRAIN using Q2
+    # retrieval cache before compute
     cache_path = processed_dir / f"retrieved_train_q2_k{args.k}.jsonl"
     limit = args.limit_train if args.limit_train > 0 else None
     precompute_retrieval_cache(
